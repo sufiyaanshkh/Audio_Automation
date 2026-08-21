@@ -8,4 +8,5 @@ huggingface_hub>=0.24
 sentencepiece>=0.2
 sacremoses>=0.1
 soundfile>=0.12
-IndicTransToolkit @ git+https://github.com/VarunGumma/IndicTransToolkit.git
+numpy>=1.26
+safetensors>=0.4
