@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Audio Automation</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="hero">
+      <p class="eyebrow">AI SUBTITLE PIPELINE</p>
+      <h1>Audio Automation</h1>
+      <p>Upload audio or video, transcribe it, optionally translate it, and export a timestamped SRT file.</p>
+    </section>
+
+    <section class="card">
+      <form id="process-form">
+        <label class="drop-zone" for="media">
+          <input id="media" name="media" type="file" accept="audio/*,video/*,.m4a,.webm,.flac,.ogg" required>
+          <span class="drop-title">Choose audio or video</span>
+          <span id="file-name" class="muted">MP3, WAV, M4A, MP4, MOV, WebM, FLAC, OGG</span>
+        </label>
+
+        <div class="grid">
+          <label>Task
+            <select id="task" name="task">
+              <option value="transcribe">Transcribe to SRT</option>
+              <option value="translate">Translate and generate SRT</option>
+            </select>
+          </label>
+
+          <label>Source language
+            <select id="source_language" name="source_language" required>
+              {% for key, item in languages.items() %}
+              <option value="{{ key }}" {% if key == 'kannada' %}selected{% endif %}>{{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+
+          <label id="target-wrap">Target language
+            <select id="target_language" name="target_language">
+              <option value="english" selected>English</option>
+              {% for key, item in languages.items() if key != 'english' %}
+              <option value="{{ key }}">{{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+
+        <button id="submit-button" type="submit">Generate subtitles</button>
+      </form>
+
+      <div id="status" class="status hidden"></div>
+      <section id="result" class="result hidden">
+        <div class="result-header">
+          <h2>Subtitle preview</h2>
+          <a id="download" class="download" href="#">Download .SRT</a>
+        </div>
+        <div id="segments"></div>
+      </section>
+    </section>
+  </main>
+  <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
