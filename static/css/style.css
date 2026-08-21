@@ -1,0 +1,28 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #e9edf7; background: #0b1020; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #1b2850, #0b1020 52%); }
+.app-shell { width: min(960px, calc(100% - 32px)); margin: 0 auto; padding: 72px 0; }
+.hero { max-width: 700px; margin-bottom: 30px; }
+.eyebrow { letter-spacing: .16em; font-size: .75rem; color: #93b4ff; font-weight: 700; }
+h1 { font-size: clamp(2.5rem, 8vw, 5rem); margin: 8px 0; }
+.hero > p:last-child, .muted { color: #aeb9d1; line-height: 1.6; }
+.card { background: rgba(17, 25, 49, .86); border: 1px solid rgba(166, 190, 255, .18); border-radius: 24px; padding: 28px; box-shadow: 0 30px 80px rgba(0,0,0,.25); }
+.drop-zone { min-height: 150px; border: 1px dashed #6076aa; border-radius: 18px; display: grid; place-content: center; text-align: center; gap: 10px; cursor: pointer; padding: 24px; }
+.drop-zone:hover { border-color: #9db6ff; background: rgba(157,182,255,.05); }
+.drop-zone input { display: none; }
+.drop-title { font-size: 1.15rem; font-weight: 700; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 24px 0; }
+label { display: grid; gap: 8px; color: #cbd5eb; font-size: .9rem; }
+select, button { border-radius: 12px; border: 1px solid #384a75; background: #0f1730; color: #eef3ff; padding: 13px; font: inherit; }
+button, .download { background: #dbe6ff; color: #10182d; border: none; font-weight: 800; cursor: pointer; text-decoration: none; }
+button { width: 100%; padding: 15px; }
+button:disabled { opacity: .65; cursor: wait; }
+.status { margin-top: 22px; padding: 14px 16px; border-radius: 12px; background: rgba(107, 143, 255, .12); color: #cddaff; }
+.result { margin-top: 24px; }
+.result-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.download { padding: 11px 15px; border-radius: 10px; white-space: nowrap; }
+.segment { border-top: 1px solid #293654; padding: 14px 0; }
+.segment span { color: #8fa6d8; font-size: .82rem; }
+.segment p { margin: 8px 0 0; line-height: 1.55; }
+.hidden { display: none; }
+@media (max-width: 720px) { .app-shell { padding: 32px 0; } .card { padding: 18px; } .grid { grid-template-columns: 1fr; } .result-header { align-items: flex-start; flex-direction: column; } }
