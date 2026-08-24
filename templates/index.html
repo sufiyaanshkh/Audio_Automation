@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Audio Automation</title>
+  <title>Universal AI Subtitle Studio</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
   <main class="app-shell">
     <section class="hero">
-      <p class="eyebrow">AI SUBTITLE PIPELINE</p>
-      <h1>Audio Automation</h1>
-      <p>Upload audio or video, transcribe it, optionally translate it, and export a timestamped SRT file.</p>
+      <p class="eyebrow">MULTILINGUAL AI SUBTITLE PIPELINE</p>
+      <h1>Universal AI Subtitle Studio</h1>
+      <p>Upload audio or video, detect mixed Indian languages, transcribe with timestamps, optionally translate, and export an SRT file.</p>
     </section>
 
     <section class="card">
@@ -26,14 +26,15 @@
           <label>Task
             <select id="task" name="task">
               <option value="transcribe">Transcribe to SRT</option>
-              <option value="translate">Translate and generate SRT</option>
+              <option value="translate" selected>Translate and generate SRT</option>
             </select>
           </label>
 
           <label>Source language
             <select id="source_language" name="source_language" required>
+              <option value="auto" selected>Auto / Mixed languages</option>
               {% for key, item in languages.items() %}
-              <option value="{{ key }}" {% if key == 'kannada' %}selected{% endif %}>{{ item.label }}</option>
+              <option value="{{ key }}">{{ item.label }}</option>
               {% endfor %}
             </select>
           </label>
@@ -46,6 +47,10 @@
               {% endfor %}
             </select>
           </label>
+        </div>
+
+        <div class="note">
+          Auto / Mixed uses Vaani-LID per audio chunk. SraVaani is the primary ASR; a timestamp-capable Whisper fallback is used when SraVaani does not expose usable segment timings.
         </div>
 
         <button id="submit-button" type="submit">Generate subtitles</button>
