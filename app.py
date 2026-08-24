@@ -40,15 +40,17 @@ def health():
 def process():
     media = request.files.get("media")
     task = request.form.get("task", "transcribe").strip().lower()
-    source = request.form.get("source_language", "").strip().lower()
+    source = request.form.get("source_language", "auto").strip().lower()
     target = request.form.get("target_language", "").strip().lower() or None
 
     if media is None or not media.filename:
         return jsonify({"error": "Please upload an audio or video file."}), 400
     if not allowed(media.filename):
         return jsonify({"error": "Unsupported media format."}), 400
-    if source not in LANGUAGES:
-        return jsonify({"error": "Please select a supported source language."}), 400
+    if source != "auto" and source not in LANGUAGES:
+        return jsonify({"error": "Please select a supported source language or Auto / Mixed."}), 400
+    if task not in {"transcribe", "translate"}:
+        return jsonify({"error": "Task must be transcribe or translate."}), 400
 
     job_id = uuid.uuid4().hex
     original_name = secure_filename(media.filename)
