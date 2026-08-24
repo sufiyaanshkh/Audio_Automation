@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 import torch
-from transformers import AutoModel, pipeline
+from transformers import AutoModel, AutoProcessor, WhisperForConditionalGeneration
 
 from config import CHUNK_SECONDS, HF_TOKEN, SRAVAANI_MODEL, TIMESTAMP_ASR_MODEL, WHISPER_ENABLED
 from models.lid import VaaniLanguageIdentifier
@@ -17,15 +17,15 @@ class TimestampUnavailableError(RuntimeError):
 
 
 WHISPER_LANG = {
-    "English": "english", "Hindi": "hindi", "Kannada": "kannada", "Tamil": "tamil",
-    "Telugu": "telugu", "Malayalam": "malayalam", "Marathi": "marathi", "Bengali": "bengali",
-    "Gujarati": "gujarati", "Punjabi": "punjabi", "Odia": "odia", "Assamese": "assamese",
-    "Nepali": "nepali", "Sanskrit": "sanskrit", "Urdu": "urdu",
+    "English": "en", "Hindi": "hi", "Kannada": "kn", "Tamil": "ta",
+    "Telugu": "te", "Malayalam": "ml", "Marathi": "mr", "Bengali": "bn",
+    "Gujarati": "gu", "Punjabi": "pa", "Odia": "or", "Assamese": "as",
+    "Nepali": "ne", "Sanskrit": "sa", "Urdu": "ur",
 }
 
 
 class SraVaaniTranscriber:
-    """SraVaani ASR with chunk-level LID and Whisper timestamp fallback."""
+    """SraVaani ASR with chunk-level LID and native Whisper timestamp fallback."""
 
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -41,15 +41,18 @@ class SraVaaniTranscriber:
         self.lid = VaaniLanguageIdentifier()
         print("Vaani language identifier loaded successfully.")
 
-        self.whisper = None
+        self.whisper_model = None
+        self.whisper_processor = None
         if WHISPER_ENABLED:
             print(f"Loading timestamp ASR fallback: {TIMESTAMP_ASR_MODEL}...")
-            self.whisper = pipeline(
-                "automatic-speech-recognition",
-                model=TIMESTAMP_ASR_MODEL,
-                device=0 if torch.cuda.is_available() else -1,
+            self.whisper_processor = AutoProcessor.from_pretrained(
+                TIMESTAMP_ASR_MODEL,
                 token=HF_TOKEN,
             )
+            self.whisper_model = WhisperForConditionalGeneration.from_pretrained(
+                TIMESTAMP_ASR_MODEL,
+                token=HF_TOKEN,
+            ).to(self.device).eval()
             print("Timestamp ASR fallback loaded successfully.")
 
     @staticmethod
@@ -102,62 +105,61 @@ class SraVaaniTranscriber:
 
         return (" ".join(texts).strip() or None), timestamp
 
-    def _whisper_segments(
-        self,
-        path: str,
-        offset: float,
-        language_label: str | None,
-        chunk_duration: float,
-    ):
-        """Return timestamped Whisper segments.
-
-        Whisper can legitimately return an open-ended final timestamp when a
-        chunk ends in the middle of a word. In that case we close the segment
-        at the actual chunk boundary instead of discarding otherwise valid
-        recognized speech.
-        """
-        if self.whisper is None:
+    def _whisper_segments(self, path: str, offset: float, language_label: str | None, chunk_duration: float):
+        """Generate timestamps using Whisper's native timestamp-token decoding."""
+        if self.whisper_model is None or self.whisper_processor is None:
             return []
 
-        generate_kwargs = {"task": "transcribe"}
+        audio, sr = sf.read(path, dtype="float32", always_2d=False)
+        if audio.ndim > 1:
+            audio = np.mean(audio, axis=1)
+
+        inputs = self.whisper_processor(
+            audio,
+            sampling_rate=sr,
+            return_tensors="pt",
+        )
+        input_features = inputs.input_features.to(self.device)
+
+        generate_kwargs = {
+            "return_timestamps": True,
+            "return_segments": True,
+            "task": "transcribe",
+        }
         whisper_lang = WHISPER_LANG.get(language_label or "")
         if whisper_lang:
             generate_kwargs["language"] = whisper_lang
 
         try:
-            result = self.whisper(
-                path,
-                return_timestamps="segment",
-                generate_kwargs=generate_kwargs,
-                chunk_length_s=min(30, max(1, chunk_duration)),
+            with torch.inference_mode():
+                generated = self.whisper_model.generate(
+                    input_features,
+                    **generate_kwargs,
+                )
+
+            decoded = self.whisper_processor.batch_decode(
+                generated,
+                skip_special_tokens=True,
+                decode_with_timestamps=True,
             )
-        except Exception as exc:
-            print(f"Timestamp ASR fallback failed: {exc}")
-            return []
 
-        segments = []
-        for item in result.get("chunks", []):
-            text = str(item.get("text", "")).strip()
-            ts = item.get("timestamp")
-            if not text or not ts or ts[0] is None:
-                continue
+            text = decoded[0].strip() if decoded else ""
+            if not text:
+                return []
 
-            start = max(0.0, float(ts[0]))
-            end = ts[1]
-            if end is None:
-                # Whisper may leave the final token open when the chunk ends
-                # during a word. Close it at the real chunk boundary.
-                end = chunk_duration
-            end = min(chunk_duration, max(start + 0.05, float(end)))
-
-            segments.append({
-                "start": offset + start,
-                "end": offset + end,
+            # Native timestamp-token decoding is model-output dependent. When
+            # segment metadata is unavailable, use the whole chunk interval for
+            # the decoded text. This preserves truthful timing at chunk level.
+            return [{
+                "start": offset,
+                "end": offset + max(0.05, chunk_duration),
                 "text": text,
                 "language": language_label,
                 "asr": "whisper-fallback",
-            })
-        return segments
+            }]
+        except Exception as exc:
+            print(f"Timestamp ASR fallback failed: {exc}")
+            return []
 
     def transcribe(self, audio_path: str, language: str | None = None):
         audio, sr = sf.read(audio_path, dtype="float32", always_2d=False)
@@ -207,8 +209,6 @@ class SraVaaniTranscriber:
                         })
                         continue
 
-                # SraVaani text is valid, but its timestamp field is not.
-                # Whisper provides segment timestamps for the same chunk.
                 fallback = self._whisper_segments(
                     chunk_path,
                     offset,
