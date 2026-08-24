@@ -27,12 +27,21 @@ LANGUAGES = {
     "urdu": {"label": "Urdu", "code": "urd_Arab", "group": "indic"},
 }
 
+LABEL_TO_KEY = {item["label"].lower(): key for key, item in LANGUAGES.items()}
+
 
 def get_language(name: str):
     key = (name or "").strip().lower()
     if key not in LANGUAGES:
         raise ValueError(f"Unsupported language: {name}")
     return LANGUAGES[key]
+
+
+def language_from_label(label: str | None):
+    if not label:
+        return None
+    key = LABEL_TO_KEY.get(label.strip().lower())
+    return LANGUAGES.get(key) if key else None
 
 
 def translation_direction(source: dict, target: dict) -> str:
