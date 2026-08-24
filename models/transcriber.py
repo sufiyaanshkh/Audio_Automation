@@ -25,7 +25,7 @@ WHISPER_LANG = {
 
 
 class SraVaaniTranscriber:
-    """SraVaani ASR with chunk-level LID and timestamp fallback."""
+    """SraVaani ASR with chunk-level LID and Whisper timestamp fallback."""
 
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -102,7 +102,20 @@ class SraVaaniTranscriber:
 
         return (" ".join(texts).strip() or None), timestamp
 
-    def _whisper_segments(self, path: str, offset: float, language_label: str | None):
+    def _whisper_segments(
+        self,
+        path: str,
+        offset: float,
+        language_label: str | None,
+        chunk_duration: float,
+    ):
+        """Return timestamped Whisper segments.
+
+        Whisper can legitimately return an open-ended final timestamp when a
+        chunk ends in the middle of a word. In that case we close the segment
+        at the actual chunk boundary instead of discarding otherwise valid
+        recognized speech.
+        """
         if self.whisper is None:
             return []
 
@@ -112,7 +125,12 @@ class SraVaaniTranscriber:
             generate_kwargs["language"] = whisper_lang
 
         try:
-            result = self.whisper(path, return_timestamps="segment", generate_kwargs=generate_kwargs)
+            result = self.whisper(
+                path,
+                return_timestamps="segment",
+                generate_kwargs=generate_kwargs,
+                chunk_length_s=min(30, max(1, chunk_duration)),
+            )
         except Exception as exc:
             print(f"Timestamp ASR fallback failed: {exc}")
             return []
@@ -121,11 +139,20 @@ class SraVaaniTranscriber:
         for item in result.get("chunks", []):
             text = str(item.get("text", "")).strip()
             ts = item.get("timestamp")
-            if not text or not ts or ts[0] is None or ts[1] is None:
+            if not text or not ts or ts[0] is None:
                 continue
+
+            start = max(0.0, float(ts[0]))
+            end = ts[1]
+            if end is None:
+                # Whisper may leave the final token open when the chunk ends
+                # during a word. Close it at the real chunk boundary.
+                end = chunk_duration
+            end = min(chunk_duration, max(start + 0.05, float(end)))
+
             segments.append({
-                "start": offset + float(ts[0]),
-                "end": offset + float(ts[1]),
+                "start": offset + start,
+                "end": offset + end,
                 "text": text,
                 "language": language_label,
                 "asr": "whisper-fallback",
@@ -151,6 +178,7 @@ class SraVaaniTranscriber:
         for index, start_sample in enumerate(range(0, total, chunk_size), start=1):
             end_sample = min(start_sample + chunk_size, total)
             offset = start_sample / sr
+            current_duration = (end_sample - start_sample) / sr
             chunk_path = self._save_chunk(audio[start_sample:end_sample], sr)
             try:
                 print("\n" + "=" * 50)
@@ -169,7 +197,7 @@ class SraVaaniTranscriber:
 
                 if sravaani_text and sravaani_timestamp is not None:
                     ts = sravaani_timestamp
-                    if isinstance(ts, (list, tuple)) and len(ts) == 2:
+                    if isinstance(ts, (list, tuple)) and len(ts) == 2 and ts[0] is not None and ts[1] is not None:
                         segments.append({
                             "start": offset + float(ts[0]),
                             "end": offset + float(ts[1]),
@@ -179,7 +207,14 @@ class SraVaaniTranscriber:
                         })
                         continue
 
-                fallback = self._whisper_segments(chunk_path, offset, language_label)
+                # SraVaani text is valid, but its timestamp field is not.
+                # Whisper provides segment timestamps for the same chunk.
+                fallback = self._whisper_segments(
+                    chunk_path,
+                    offset,
+                    language_label,
+                    current_duration,
+                )
                 if fallback:
                     segments.extend(fallback)
                 elif sravaani_text:
