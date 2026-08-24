@@ -9,40 +9,23 @@ from transformers import AutoModel, pipeline
 
 from config import CHUNK_SECONDS, HF_TOKEN, SRAVAANI_MODEL, TIMESTAMP_ASR_MODEL, WHISPER_ENABLED
 from models.lid import VaaniLanguageIdentifier
+from utils.languages import get_language
 
 
 class TimestampUnavailableError(RuntimeError):
     pass
 
 
-# Labels returned by Vaani-LID_v0 -> Whisper language codes where available.
 WHISPER_LANG = {
-    "English": "english",
-    "Hindi": "hindi",
-    "Kannada": "kannada",
-    "Tamil": "tamil",
-    "Telugu": "telugu",
-    "Malayalam": "malayalam",
-    "Marathi": "marathi",
-    "Bengali": "bengali",
-    "Gujarati": "gujarati",
-    "Punjabi": "punjabi",
-    "Odia": "odia",
-    "Assamese": "assamese",
-    "Nepali": "nepali",
-    "Sanskrit": "sanskrit",
-    "Urdu": "urdu",
+    "English": "english", "Hindi": "hindi", "Kannada": "kannada", "Tamil": "tamil",
+    "Telugu": "telugu", "Malayalam": "malayalam", "Marathi": "marathi", "Bengali": "bengali",
+    "Gujarati": "gujarati", "Punjabi": "punjabi", "Odia": "odia", "Assamese": "assamese",
+    "Nepali": "nepali", "Sanskrit": "sanskrit", "Urdu": "urdu",
 }
 
 
 class SraVaaniTranscriber:
-    """Multilingual ASR adapter.
-
-    SraVaani is the primary ASR. Vaani-LID_v0 selects a likely language for
-    each chunk when source language is auto/mixed. If SraVaani returns an
-    empty hypothesis or does not expose usable timestamps, Whisper is used
-    as a timestamp-capable fallback. No timestamps are fabricated.
-    """
+    """SraVaani ASR with chunk-level LID and timestamp fallback."""
 
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -117,25 +100,19 @@ class SraVaaniTranscriber:
             if ts is not None:
                 timestamp = ts
 
-        text = " ".join(texts).strip()
-        return (text or None), timestamp
+        return (" ".join(texts).strip() or None), timestamp
 
     def _whisper_segments(self, path: str, offset: float, language_label: str | None):
         if self.whisper is None:
             return []
 
-        generate_kwargs = {}
+        generate_kwargs = {"task": "transcribe"}
         whisper_lang = WHISPER_LANG.get(language_label or "")
         if whisper_lang:
             generate_kwargs["language"] = whisper_lang
-            generate_kwargs["task"] = "transcribe"
 
         try:
-            result = self.whisper(
-                path,
-                return_timestamps="segment",
-                generate_kwargs=generate_kwargs,
-            )
+            result = self.whisper(path, return_timestamps="segment", generate_kwargs=generate_kwargs)
         except Exception as exc:
             print(f"Timestamp ASR fallback failed: {exc}")
             return []
@@ -165,25 +142,23 @@ class SraVaaniTranscriber:
         chunk_size = max(1, int(CHUNK_SECONDS * sr))
         total = len(audio)
         segments = []
+        fixed_label = None
+        if language and language != "auto":
+            fixed_label = get_language(language)["label"]
 
         print(f"Splitting audio into {int(np.ceil(total / chunk_size))} chunks...")
 
         for index, start_sample in enumerate(range(0, total, chunk_size), start=1):
             end_sample = min(start_sample + chunk_size, total)
             offset = start_sample / sr
-            chunk = audio[start_sample:end_sample]
-            chunk_path = self._save_chunk(chunk, sr)
-
+            chunk_path = self._save_chunk(audio[start_sample:end_sample], sr)
             try:
                 print("\n" + "=" * 50)
                 print(f"PROCESSING CHUNK {index}")
                 print(f"Time offset: {offset:.2f} seconds")
-                print(f"Transcribing chunk: {chunk_path}")
 
-                language_label = None
-                if language and language != "auto":
-                    language_label = language
-                else:
+                language_label = fixed_label
+                if language == "auto" or not language:
                     try:
                         language_label, confidence = self.lid.identify(chunk_path)
                         print(f"Detected language: {language_label} ({confidence:.3f})")
@@ -192,7 +167,6 @@ class SraVaaniTranscriber:
 
                 sravaani_text, sravaani_timestamp = self._sravaani_text(chunk_path, language_label)
 
-                # If SraVaani exposes usable timestamps, prefer its own result.
                 if sravaani_text and sravaani_timestamp is not None:
                     ts = sravaani_timestamp
                     if isinstance(ts, (list, tuple)) and len(ts) == 2:
@@ -205,26 +179,21 @@ class SraVaaniTranscriber:
                         })
                         continue
 
-                # Current SraVaani Python output may contain text without usable
-                # segment timing. Use Whisper only for timestamped segmentation.
                 fallback = self._whisper_segments(chunk_path, offset, language_label)
                 if fallback:
                     segments.extend(fallback)
                 elif sravaani_text:
-                    # Do not fabricate a timestamp. Surface a precise error.
                     raise TimestampUnavailableError(
-                        "SraVaani produced text, but neither SraVaani nor the timestamp ASR fallback "
-                        "returned usable start/end timestamps."
+                        "SraVaani produced text, but no usable timestamps were returned and the timestamp fallback failed."
                     )
                 else:
                     print("No speech recognized in this chunk.")
-
             finally:
                 Path(chunk_path).unlink(missing_ok=True)
 
         if not segments:
             raise TimestampUnavailableError(
-                "No speech segments were recognized. Check the audio, language, model access, and microphone/media quality."
+                "No speech segments were recognized. Check the audio, language, model access, and media quality."
             )
 
         segments.sort(key=lambda item: (item["start"], item["end"]))
