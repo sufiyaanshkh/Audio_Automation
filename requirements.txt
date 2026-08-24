@@ -10,3 +10,4 @@ soundfile>=0.12
 numpy>=1.26
 safetensors>=0.4
 librosa>=0.10
+pytorch-metric-learning>=2.8
